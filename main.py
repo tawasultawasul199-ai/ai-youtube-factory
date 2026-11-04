@@ -10,11 +10,11 @@ LANGUAGES = ["en", "es", "de", "fr", "pt", "ar", "hi", "ja", "ko"]
 HISTORY_FILE = "history.json"
 
 AI_STYLES = {
-    "3d_simulation": "3D medical and physics simulation style like Zack D Films, glossy 3D render, cross-section view, clean studio lighting, Unreal Engine 5, ultra-detailed 8k",
-    "pixar_cartoon": "3D Pixar Disney animation style, expressive cute 3D cartoon characters, vibrant colors, volumetric cinematic lighting, Unreal Engine 5 render, 8k",
-    "dark_cinema": "Hyper-realistic Netflix dark documentary cinematography, 35mm lens, moody dramatic lighting, shallow depth of field, photorealistic 8k",
-    "sci_fi_future": "Futuristic cinematic sci-fi concept art, holographic neon lighting, photorealistic CGI, IMAX 70mm quality, 8k",
-    "epic_anime": "High-budget Makoto Shinkai anime movie style, breathtaking detailed background, dramatic lighting, vibrant cinematic colors, 8k"
+    "3d_simulation": "Minimalist 2D vector explainer style, clean black stickman character with expressive face, flat design, pastel background colors, whiteboard animation style, high quality, no text",
+    "pixar_cartoon": "2D vector cartoon explainer style, simple clean lines, vibrant flat colors, friendly explanatory character, educational YouTube video aesthetic, 8k",
+    "dark_cinema": "Moody 2D vector style, dramatic minimalist lighting, clean lines, flat vector art, dramatic storytelling aesthetic",
+    "sci_fi_future": "Clean 2D vector technical explainer style, futuristic elements in flat design, pastel blueprints, minimalist vector art",
+    "epic_anime": "Clean minimalist 2D vector style, expressive stickman or simple character, dramatic clean line art, flat aesthetic"
 }
 
 VOICES = {
@@ -119,7 +119,7 @@ def generate_content(trends):
       "selected_topic": "topic name",
       "voice_mood": "dramatic",
       "character_dna": "Detailed visual description of main character or core subject",
-      "thumbnail_prompt": "Extreme close-up viral YouTube thumbnail, high contrast, expressive shocked face or glowing 3D cross-section, 8k, no text",
+      "thumbnail_prompt": "Minimalist 2D vector explainer thumbnail, clean stickman character, high contrast, vibrant flat colors, 8k, no text",
       "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8"],
       "long_scenes": [
         {{
@@ -194,11 +194,11 @@ def generate_content(trends):
     char_dna = data.get("character_dna", "")
     for scene in data["long_scenes"]:
         st = AI_STYLES.get(scene.get("style", "3d_simulation"), AI_STYLES["3d_simulation"])
-        scene["image_prompt"] = f"{st}. {char_dna}, {scene['action_prompt']}, no text, no watermark"
+        scene["image_prompt"] = f"{st}, {char_dna}, {scene['action_prompt']}, clean vector illustration, no text, no watermark"
 
     for scene in data["short_scenes"]:
         st = AI_STYLES.get(scene.get("style", "3d_simulation"), AI_STYLES["3d_simulation"])
-        scene["image_prompt"] = f"{st}. {char_dna}, {scene['action_prompt']}, vertical 9:16 composition, no text"
+        scene["image_prompt"] = f"{st}, {char_dna}, {scene['action_prompt']}, vertical 9:16 composition, clean vector illustration, no text"
 
     return data
 
@@ -226,7 +226,7 @@ def download_image(prompt, width, height, filename, seed=42):
                 return
         except Exception:
             time.sleep(3)
-    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:d=1", "-frames:v", "1", filename])
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=white:s={width}x{height}:d=1", "-frames:v", "1", filename])
 
 def get_audio_duration(filename):
     cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filename]
@@ -317,14 +317,14 @@ def upload_to_youtube(video_path, data, srt_files, thumb_path=None, is_short=Fal
         if is_short and "#Shorts" not in t:
             t = f"{t[:85]} #Shorts"
         cta = lang_data.get("pinned_comment", "Check this out:")
-        full_desc = f"🔥 {cta} {AFFILIATE_LINK}\n\n{lang_data['description']}\n\n#AI #3D #Animation #Viral"
+        full_desc = f"🔥 {cta} {AFFILIATE_LINK}\n\n{lang_data['description']}\n\n#Animation #Explainer #Vector #Viral"
         loc_payload[lang] = {"title": t[:100], "description": full_desc[:4900]}
 
     body = {
         "snippet": {
             "title": loc_payload["en"]["title"],
             "description": loc_payload["en"]["description"],
-            "tags": data.get("tags", ["AI", "3D", "Documentary", "Shorts"]),
+            "tags": data.get("tags", ["Animation", "Explainer", "Vector", "Shorts"]),
             "defaultLanguage": "en",
             "categoryId": "24"
         },
@@ -380,7 +380,7 @@ if __name__ == "__main__":
 
     thumb_file = "thumbnail.jpg"
     download_image(
-        f"{AI_STYLES['3d_simulation']}, {data.get('thumbnail_prompt', data['selected_topic'])}, vibrant high contrast, no text",
+        f"Minimalist 2D vector explainer thumbnail, {data.get('thumbnail_prompt', data['selected_topic'])}, clean vector art, no text",
         1280, 720, thumb_file, seed=777
     )
 
