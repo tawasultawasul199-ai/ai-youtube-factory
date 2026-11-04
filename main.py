@@ -10,7 +10,7 @@ LANGUAGES = ["en", "es", "de", "fr", "pt", "ar", "hi", "ja", "ko"]
 HISTORY_FILE = "history.json"
 
 AI_STYLES = {
-    "3d_simulation": "2D vector explainer style, minimalist black stickman character, clean line art, solid pastel background, whiteboard style, high quality",
+    "3d_simulation": "2D vector explainer style, minimalist black stickman character, clean line art, solid pastel background, whiteboard style, high quality, vibrant flat colors",
     "pixar_cartoon": "2D vector cartoon explainer style, simple clean lines, flat colors, friendly stickman character, educational aesthetic",
     "dark_cinema": "2D vector minimalist style, clean lines, flat vector art, dramatic storytelling aesthetic",
     "sci_fi_future": "Clean 2D vector technical explainer style, minimalist vector art",
@@ -216,7 +216,6 @@ async def create_voice(text, filename, mood="dramatic"):
 
 def download_image(prompt, width, height, filename, seed=42):
     encoded = urllib.parse.quote(prompt)
-    # استخدام عدة سيرفرات وموديلات لضمان نجاح جلب الصورة وعدم فشلها نهائياً
     urls = [
         f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&model=flux&nologo=true&seed={seed}",
         f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&model=stable-diffusion&nologo=true&seed={seed}",
@@ -233,7 +232,6 @@ def download_image(prompt, width, height, filename, seed=42):
             except Exception:
                 time.sleep(1)
     
-    # احتياطي قوي جداً يمنع الشاشة السوداء نهائياً بتوليد خلفية ملونة وتصميم توضيحي
     subprocess.run([
         "ffmpeg", "-y", "-f", "lavfi", 
         "-i", f"color=c=aliceblue:s={width}x{height}:d=1", 
