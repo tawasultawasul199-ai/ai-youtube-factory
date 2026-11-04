@@ -1,6 +1,7 @@
 import os, json, time, random, asyncio, subprocess, urllib.parse
 import requests, feedparser
 import edge_tts
+import google.generativeai as genai
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -47,6 +48,7 @@ def get_daily_trend():
 
 def generate_content(trends):
     api_key = os.environ["GEMINI_API_KEY"].strip()
+    genai.configure(api_key=api_key)
     
     prompt = f"""
     Pick the most viral, curiosity-inducing topic from this list: {trends}.
@@ -101,13 +103,10 @@ def generate_content(trends):
     IMPORTANT: Provide 12 scenes for 'long_scenes' and 6 scenes for 'short_scenes'. Ensure 'long_subs' has 12 items and 'short_subs' has 6 items for every language.
     """
 
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    
-    res = requests.post(url, json=payload, timeout=180)
-    res.raise_for_status()
-    
-    raw_text = res.json()["candidates"][0]["content"]["parts"][0]["text"]
+    model = genai.GenerativeModel("models/gemini-1.5-flash")
+    response = model.generate_content(prompt)
+    raw_text = response.text
+
     cleaned = raw_text.strip()
     if "```" in cleaned:
         cleaned = cleaned.split("```")[1]
