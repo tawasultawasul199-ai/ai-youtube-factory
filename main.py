@@ -24,7 +24,14 @@ VOICES = {
 }
 
 def get_daily_trend():
-    history = json.load(open(HISTORY_FILE, encoding="utf-8")) if os.path.exists(HISTORY_FILE) else []
+    history = []
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, encoding="utf-8") as f:
+                history = json.load(f)
+        except Exception:
+            history = []
+
     feeds = [
         "https://trends.google.com/trending/rss?geo=US",
         "https://www.reddit.com/r/todayilearned/top/.rss?t=day",
@@ -45,33 +52,59 @@ def get_daily_trend():
         trends = ["What Happens Inside the Human Body Under Extreme Conditions"]
     return trends[:12], history
 
-def get_active_gemini_model(api_key):
-    list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-    res = requests.get(list_url, timeout=30)
-    res.raise_for_status()
-    models = res.json().get("models", [])
-    
-    excluded = ["vision", "embedding", "imagen", "tts", "audio", "robotics", "computer-use", "aqa"]
-    valid_models = [
-        m["name"] for m in models
-        if "generateContent" in m.get("supportedGenerationMethods", [])
-        and "gemini" in m["name"]
-        and not any(x in m["name"].lower() for x in excluded)
+def get_candidate_gemini_models(api_key):
+    candidates = []
+    try:
+        list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+        res = requests.get(list_url, timeout=30)
+        if res.status_code == 200:
+            models = res.json().get("models", [])
+            excluded = ["vision", "embedding", "imagen", "tts", "audio", "robotics", "computer-use", "aqa", "thinking"]
+            for m in models:
+                name = m.get("name", "")
+                methods = m.get("supportedGenerationMethods", [])
+                if "generateContent" in methods and "gemini" in name.lower():
+                    if not any(x in name.lower() for x in excluded):
+                        candidates.append(name)
+    except Exception as e:
+        print(f"ListModels warning: {e}")
+
+    priority = [
+        "models/gemini-flash-latest",
+        "models/gemini-2.0-flash",
+        "models/gemini-2.0-flash-lite",
+        "models/gemini-1.5-flash-latest",
+        "models/gemini-pro-latest"
     ]
-    
-    for preferred in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
-        for m in valid_models:
-            if preferred in m:
-                return m
-                
-    flash_models = [m for m in valid_models if "flash" in m]
-    return flash_models[0] if flash_models else valid_models[0]
+    ordered = []
+    for p in priority:
+        if p in candidates and p not in ordered:
+            ordered.append(p)
+    for c in reversed(candidates):
+        if c not in ordered:
+            ordered.append(c)
+    for p in priority:
+        if p not in ordered:
+            ordered.append(p)
+    return ordered
+
+def parse_ai_json(raw_text):
+    cleaned = raw_text.strip()
+    if "```" in cleaned:
+        parts = cleaned.split("```")
+        for part in parts:
+            if "{" in part and "}" in part:
+                cleaned = part
+                break
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+    start_idx = cleaned.find("{")
+    end_idx = cleaned.rfind("}") + 1
+    return json.loads(cleaned[start_idx:end_idx])
 
 def generate_content(trends):
     api_key = os.environ["GEMINI_API_KEY"].strip()
-    model_name = get_active_gemini_model(api_key)
-    print(f"Using active model: {model_name}")
-    
+
     prompt = f"""
     Pick the most viral, curiosity-inducing topic from this list: {trends}.
     Act as an elite YouTube AI Director. Your goal is maximum viewer retention and high CTR.
@@ -125,24 +158,44 @@ def generate_content(trends):
     IMPORTANT: Provide 12 scenes for 'long_scenes' and 6 scenes for 'short_scenes'. Ensure 'long_subs' has 12 items and 'short_subs' has 6 items for every language.
     """
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={api_key}"
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"responseMimeType": "application/json"}
-    }
-    
-    res = requests.post(url, json=payload, timeout=180)
-    res.raise_for_status()
-    
-    raw_text = res.json()["candidates"][0]["content"]["parts"][0]["text"]
-    cleaned = raw_text.strip()
-    if "```" in cleaned:
-        cleaned = cleaned.split("```")[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:]
-    start_idx = cleaned.find("{")
-    end_idx = cleaned.rfind("}") + 1
-    data = json.loads(cleaned[start_idx:end_idx])
+    data = None
+    candidate_models = get_candidate_gemini_models(api_key)
+    print(f"Found {len(candidate_models)} candidate models to test.")
+
+    for model_name in candidate_models:
+        for version in ["v1beta", "v1"]:
+            url = f"https://generativelanguage.googleapis.com/{version}/{model_name}:generateContent?key={api_key}"
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            try:
+                res = requests.post(url, json=payload, timeout=120)
+                if res.status_code == 200:
+                    raw_text = res.json()["candidates"][0]["content"]["parts"][0]["text"]
+                    parsed = parse_ai_json(raw_text)
+                    if "long_scenes" in parsed and "short_scenes" in parsed:
+                        data = parsed
+                        print(f"Success with {version}/{model_name}")
+                        break
+                else:
+                    print(f"Skipped {version}/{model_name} (HTTP {res.status_code})")
+            except Exception as e:
+                print(f"Error testing {version}/{model_name}: {e}")
+        if data:
+            break
+
+    if not data:
+        print("Falling back to Pollinations AI text generator...")
+        res = requests.post(
+            "https://text.pollinations.ai/",
+            json={
+                "messages": [{"role": "user", "content": prompt}],
+                "model": "openai",
+                "jsonMode": True
+            },
+            timeout=180
+        )
+        res.raise_for_status()
+        data = parse_ai_json(res.text)
+
     print(f"Selected topic: {data.get('selected_topic')}")
 
     char_dna = data.get("character_dna", "")
@@ -158,8 +211,15 @@ def generate_content(trends):
 
 async def create_voice(text, filename, mood="dramatic"):
     voice_name = VOICES.get(mood, "en-US-ChristopherNeural")
-    communicate = edge_tts.Communicate(text, voice_name, rate="+10%")
-    await communicate.save(filename)
+    for _ in range(3):
+        try:
+            communicate = edge_tts.Communicate(text, voice_name, rate="+10%")
+            await communicate.save(filename)
+            if os.path.exists(filename) and os.path.getsize(filename) > 100:
+                return
+        except Exception:
+            await asyncio.sleep(2)
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", "4", "-q:a", "9", "-acodec", "libmp3lame", filename])
 
 def download_image(prompt, width, height, filename, seed=42):
     encoded = urllib.parse.quote(prompt)
@@ -224,118 +284,4 @@ def build_video(scenes, prefix, width, height, localizations, sub_key, mood="dra
             "-vf", vf, "-c:v", "libx264", "-t", str(duration),
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", clip_path
         ]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        clip_files.append(f"file 'clip_{i}.mp4'")
-
-    list_path = f"{prefix}/list.txt"
-    with open(list_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(clip_files))
-
-    output_video = f"{prefix}_final.mp4"
-    subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_path, "-c", "copy", output_video])
-
-    srt_files = {}
-    for lang in LANGUAGES:
-        srt_path = f"{prefix}_{lang}.srt"
-        subs = localizations.get(lang, {}).get(sub_key, [])
-        with open(srt_path, "w", encoding="utf-8") as f:
-            for idx, (start, end) in enumerate(timings):
-                text = subs[idx] if idx < len(subs) else scenes[idx]["narration_en"]
-                f.write(f"{idx+1}\n{format_srt_time(start)} --> {format_srt_time(end)}\n{text}\n\n")
-        srt_files[lang] = srt_path
-
-    return output_video, srt_files
-
-def upload_to_youtube(video_path, data, srt_files, thumb_path=None, is_short=False):
-    creds = Credentials(
-        None,
-        refresh_token=os.environ["YT_REFRESH_TOKEN"],
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=os.environ["YT_CLIENT_ID"],
-        client_secret=os.environ["YT_CLIENT_SECRET"]
-    )
-    youtube = build("youtube", "v3", credentials=creds)
-    localizations = data["localizations"]
-
-    loc_payload = {}
-    for lang in LANGUAGES:
-        lang_data = localizations.get(lang, localizations["en"])
-        t = lang_data["title"]
-        if is_short and "#Shorts" not in t:
-            t = f"{t[:85]} #Shorts"
-        cta = lang_data.get("pinned_comment", "Check this out:")
-        full_desc = f"🔥 {cta} {AFFILIATE_LINK}\n\n{lang_data['description']}\n\n#AI #3D #Animation #Viral"
-        loc_payload[lang] = {"title": t[:100], "description": full_desc[:4900]}
-
-    body = {
-        "snippet": {
-            "title": loc_payload["en"]["title"],
-            "description": loc_payload["en"]["description"],
-            "tags": data.get("tags", ["AI", "3D", "Documentary", "Shorts"]),
-            "defaultLanguage": "en",
-            "categoryId": "24"
-        },
-        "status": {"privacyStatus": "private", "selfDeclaredMadeForKids": False},
-        "localizations": loc_payload
-    }
-
-    media = MediaFileUpload(video_path, chunksize=-1, resumable=True)
-    req = youtube.videos().insert(part="snippet,status,localizations", body=body, media_body=media)
-    res = req.execute()
-    video_id = res["id"]
-    print(f"Uploaded {'Short' if is_short else 'Long'} Video ID: {video_id}")
-
-    if not is_short and thumb_path and os.path.exists(thumb_path):
-        try:
-            youtube.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(thumb_path)).execute()
-        except Exception as e:
-            print(f"Thumbnail skip: {e}")
-
-    try:
-        en_cta = localizations["en"].get("pinned_comment", "Check out this link:")
-        ar_cta = localizations.get("ar", {}).get("pinned_comment", "اضغط على الرابط التالي:")
-        es_cta = localizations.get("es", {}).get("pinned_comment", "Mira este enlace:")
-        comment_text = f"📌 {en_cta} {AFFILIATE_LINK}\n🌍 {es_cta} {AFFILIATE_LINK}\n🔥 {ar_cta} {AFFILIATE_LINK}"
-        youtube.commentThreads().insert(
-            part="snippet",
-            body={
-                "snippet": {
-                    "videoId": video_id,
-                    "topLevelComment": {"snippet": {"textOriginal": comment_text}}
-                }
-            }
-        ).execute()
-    except Exception as e:
-        print(f"Comment skip: {e}")
-
-    if not is_short:
-        for lang, srt_path in srt_files.items():
-            try:
-                youtube.captions().insert(
-                    part="snippet",
-                    body={"snippet": {"videoId": video_id, "language": lang, "name": lang.upper(), "isDraft": False}},
-                    media_body=MediaFileUpload(srt_path)
-                ).execute()
-            except Exception as e:
-                print(f"Subtitle skip {lang}: {e}")
-
-if __name__ == "__main__":
-    trends, history = get_daily_trend()
-    data = generate_content(trends)
-    mood = data.get("voice_mood", "dramatic")
-
-    thumb_file = "thumbnail.jpg"
-    download_image(
-        f"{AI_STYLES['3d_simulation']}, {data.get('thumbnail_prompt', data['selected_topic'])}, vibrant high contrast, no text",
-        1280, 720, thumb_file, seed=777
-    )
-
-    long_vid, long_srts = build_video(data["long_scenes"], "long", 1280, 720, data["localizations"], "long_subs", mood)
-    short_vid, short_srts = build_video(data["short_scenes"], "short", 720, 1280, data["localizations"], "short_subs", mood)
-
-    upload_to_youtube(long_vid, data, long_srts, thumb_path=thumb_file, is_short=False)
-    upload_to_youtube(short_vid, data, short_srts, thumb_path=None, is_short=True)
-
-    history.append(data["selected_topic"])
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
+        subprocess.run(cmd, stdout=subprocess.DEVNULL
