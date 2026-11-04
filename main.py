@@ -10,11 +10,11 @@ LANGUAGES = ["en", "es", "de", "fr", "pt", "ar", "hi", "ja", "ko"]
 HISTORY_FILE = "history.json"
 
 AI_STYLES = {
-    "3d_simulation": "Minimalist 2D vector explainer style, clean black stickman character with expressive face, flat design, pastel background colors, whiteboard animation style, high quality, no text",
-    "pixar_cartoon": "2D vector cartoon explainer style, simple clean lines, vibrant flat colors, friendly explanatory character, educational YouTube video aesthetic, 8k",
-    "dark_cinema": "Moody 2D vector style, dramatic minimalist lighting, clean lines, flat vector art, dramatic storytelling aesthetic",
-    "sci_fi_future": "Clean 2D vector technical explainer style, futuristic elements in flat design, pastel blueprints, minimalist vector art",
-    "epic_anime": "Clean minimalist 2D vector style, expressive stickman or simple character, dramatic clean line art, flat aesthetic"
+    "3d_simulation": "2D vector explainer style, minimalist black stickman character, clean line art, solid pastel background, whiteboard style, high quality",
+    "pixar_cartoon": "2D vector cartoon explainer style, simple clean lines, flat colors, friendly stickman character, educational aesthetic",
+    "dark_cinema": "2D vector minimalist style, clean lines, flat vector art, dramatic storytelling aesthetic",
+    "sci_fi_future": "Clean 2D vector technical explainer style, minimalist vector art",
+    "epic_anime": "Clean minimalist 2D vector stickman style, flat aesthetic"
 }
 
 VOICES = {
@@ -118,8 +118,8 @@ def generate_content(trends):
     {{
       "selected_topic": "topic name",
       "voice_mood": "dramatic",
-      "character_dna": "Detailed visual description of main character or core subject",
-      "thumbnail_prompt": "Minimalist 2D vector explainer thumbnail, clean stickman character, high contrast, vibrant flat colors, 8k, no text",
+      "character_dna": "Detailed visual description of stickman character",
+      "thumbnail_prompt": "Minimalist 2D vector explainer thumbnail, clean stickman character, vibrant flat colors, no text",
       "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8"],
       "long_scenes": [
         {{
@@ -194,11 +194,11 @@ def generate_content(trends):
     char_dna = data.get("character_dna", "")
     for scene in data["long_scenes"]:
         st = AI_STYLES.get(scene.get("style", "3d_simulation"), AI_STYLES["3d_simulation"])
-        scene["image_prompt"] = f"{st}, {char_dna}, {scene['action_prompt']}, clean vector illustration, colorful flat design, no text, no watermark"
+        scene["image_prompt"] = f"{st}, stickman character, {char_dna}, {scene['action_prompt']}, clean flat vector style, colorful background, no text"
 
     for scene in data["short_scenes"]:
         st = AI_STYLES.get(scene.get("style", "3d_simulation"), AI_STYLES["3d_simulation"])
-        scene["image_prompt"] = f"{st}, {char_dna}, {scene['action_prompt']}, vertical 9:16 composition, clean vector illustration, colorful flat design, no text"
+        scene["image_prompt"] = f"{st}, stickman character, {char_dna}, {scene['action_prompt']}, vertical 9:16 composition, clean flat vector style, no text"
 
     return data
 
@@ -216,26 +216,27 @@ async def create_voice(text, filename, mood="dramatic"):
 
 def download_image(prompt, width, height, filename, seed=42):
     encoded = urllib.parse.quote(prompt)
-    # محاولة جلب الصورة من مصدرين مختلفين لضمان عدم فشل التحميل أبداً
+    # استخدام عدة سيرفرات وموديلات لضمان نجاح جلب الصورة وعدم فشلها نهائياً
     urls = [
         f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&model=flux&nologo=true&seed={seed}",
+        f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&model=stable-diffusion&nologo=true&seed={seed}",
         f"https://pollinations.ai/p/{encoded}?width={width}&height={height}&seed={seed}"
     ]
     for url in urls:
         for _ in range(2):
             try:
-                r = requests.get(url, timeout=45)
-                if r.status_code == 200 and len(r.content) > 2000:
+                r = requests.get(url, timeout=30)
+                if r.status_code == 200 and len(r.content) > 3000:
                     with open(filename, "wb") as f:
                         f.write(r.content)
                     return
             except Exception:
-                time.sleep(2)
+                time.sleep(1)
     
-    # إذا فشل المصدرين تماماً، نولد رسمة توضيحية ملونة خالية من البياض باستخدام FFmpeg
+    # احتياطي قوي جداً يمنع الشاشة السوداء نهائياً بتوليد خلفية ملونة وتصميم توضيحي
     subprocess.run([
         "ffmpeg", "-y", "-f", "lavfi", 
-        "-i", f"color=c=lightblue:s={width}x{height}:d=1", 
+        "-i", f"color=c=aliceblue:s={width}x{height}:d=1", 
         "-frames:v", "1", filename
     ])
 
@@ -253,13 +254,13 @@ def format_srt_time(seconds):
 def get_camera_filter(move, width, height, frames, fps):
     base = f"scale={width*2}:{height*2},zoompan="
     if move == "zoom_out":
-        return f"{base}z='if(eq(on,1),1.45,max(1.001,zoom-0.0025))':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={width}x{height}:fps={fps}"
+        return f"{base}z='if(eq(on,1),1.35,max(1.001,zoom-0.002))':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={width}x{height}:fps={fps}"
     elif move == "pan_right":
-        return f"{base}z=1.25:d={frames}:x='min(iw-iw/zoom,(on/{frames})*(iw-iw/zoom))':y='ih/2-(ih/zoom/2)':s={width}x{height}:fps={fps}"
+        return f"{base}z=1.15:d={frames}:x='min(iw-iw/zoom,(on/{frames})*(iw-iw/zoom))':y='ih/2-(ih/zoom/2)':s={width}x{height}:fps={fps}"
     elif move == "pan_left":
-        return f"{base}z=1.25:d={frames}:x='max(0,(1-on/{frames})*(iw-iw/zoom))':y='ih/2-(ih/zoom/2)':s={width}x{height}:fps={fps}"
+        return f"{base}z=1.15:d={frames}:x='max(0,(1-on/{frames})*(iw-iw/zoom))':y='ih/2-(ih/zoom/2)':s={width}x{height}:fps={fps}"
     else:
-        return f"{base}z='min(zoom+0.0025,1.45)':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={width}x{height}:fps={fps}"
+        return f"{base}z='min(zoom+0.002,1.35)':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={width}x{height}:fps={fps}"
 
 def build_video(scenes, prefix, width, height, localizations, sub_key, mood="dramatic"):
     os.makedirs(prefix, exist_ok=True)
@@ -328,14 +329,14 @@ def upload_to_youtube(video_path, data, srt_files, thumb_path=None, is_short=Fal
         if is_short and "#Shorts" not in t:
             t = f"{t[:85]} #Shorts"
         cta = lang_data.get("pinned_comment", "Check this out:")
-        full_desc = f"🔥 {cta} {AFFILIATE_LINK}\n\n{lang_data['description']}\n\n#Animation #Explainer #Vector #Viral"
+        full_desc = f"🔥 {cta} {AFFILIATE_LINK}\n\n{lang_data['description']}\n\n#Stickman #Animation #Explainer #Viral"
         loc_payload[lang] = {"title": t[:100], "description": full_desc[:4900]}
 
     body = {
         "snippet": {
             "title": loc_payload["en"]["title"],
             "description": loc_payload["en"]["description"],
-            "tags": data.get("tags", ["Animation", "Explainer", "Vector", "Shorts"]),
+            "tags": data.get("tags", ["Stickman", "Animation", "Explainer", "Shorts"]),
             "defaultLanguage": "en",
             "categoryId": "24"
         },
@@ -391,7 +392,7 @@ if __name__ == "__main__":
 
     thumb_file = "thumbnail.jpg"
     download_image(
-        f"Minimalist 2D vector explainer thumbnail, {data.get('thumbnail_prompt', data['selected_topic'])}, colorful flat design, no text",
+        f"Minimalist 2D vector explainer thumbnail, clean stickman character, vibrant flat colors, no text",
         1280, 720, thumb_file, seed=777
     )
 
