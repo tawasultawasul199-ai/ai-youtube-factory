@@ -1,7 +1,6 @@
 import os, json, time, random, asyncio, subprocess, urllib.parse
 import requests, feedparser
 import edge_tts
-import google.generativeai as genai
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -46,9 +45,32 @@ def get_daily_trend():
         trends = ["What Happens Inside the Human Body Under Extreme Conditions"]
     return trends[:12], history
 
+def get_active_gemini_model(api_key):
+    list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+    res = requests.get(list_url, timeout=30)
+    res.raise_for_status()
+    models = res.json().get("models", [])
+    
+     excluded = ["vision", "embedding", "imagen", "tts", "audio", "robotics", "computer-use", "aqa"]
+    valid_models = [
+        m["name"] for m in models
+        if "generateContent" in m.get("supportedGenerationMethods", [])
+        and "gemini" in m["name"]
+        and not any(x in m["name"].lower() for x in excluded)
+    ]
+    
+    for preferred in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
+        for m in valid_models:
+            if preferred in m:
+                return m
+                
+    flash_models = [m for m in valid_models if "flash" in m]
+    return flash_models[0] if flash_models else valid_models[0]
+
 def generate_content(trends):
     api_key = os.environ["GEMINI_API_KEY"].strip()
-    genai.configure(api_key=api_key)
+    model_name = get_active_gemini_model(api_key)
+    print(f"Using active model: {model_name}")
     
     prompt = f"""
     Pick the most viral, curiosity-inducing topic from this list: {trends}.
@@ -103,10 +125,16 @@ def generate_content(trends):
     IMPORTANT: Provide 12 scenes for 'long_scenes' and 6 scenes for 'short_scenes'. Ensure 'long_subs' has 12 items and 'short_subs' has 6 items for every language.
     """
 
-    model = genai.GenerativeModel("gemini-pro")
-    response = model.generate_content(prompt)
-    raw_text = response.text
-
+    url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={api_key}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json"}
+    }
+    
+    res = requests.post(url, json=payload, timeout=180)
+    res.raise_for_status()
+    
+    raw_text = res.json()["candidates"][0]["content"]["parts"][0]["text"]
     cleaned = raw_text.strip()
     if "```" in cleaned:
         cleaned = cleaned.split("```")[1]
@@ -115,6 +143,7 @@ def generate_content(trends):
     start_idx = cleaned.find("{")
     end_idx = cleaned.rfind("}") + 1
     data = json.loads(cleaned[start_idx:end_idx])
+    print(f"Selected topic: {data.get('selected_topic')}")
 
     char_dna = data.get("character_dna", "")
     for scene in data["long_scenes"]:
