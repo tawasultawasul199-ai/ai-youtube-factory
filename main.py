@@ -194,11 +194,11 @@ def generate_content(trends):
     char_dna = data.get("character_dna", "")
     for scene in data["long_scenes"]:
         st = AI_STYLES.get(scene.get("style", "3d_simulation"), AI_STYLES["3d_simulation"])
-        scene["image_prompt"] = f"{st}, {char_dna}, {scene['action_prompt']}, clean vector illustration, no text, no watermark"
+        scene["image_prompt"] = f"{st}, {char_dna}, {scene['action_prompt']}, clean vector illustration, colorful flat design, no text, no watermark"
 
     for scene in data["short_scenes"]:
         st = AI_STYLES.get(scene.get("style", "3d_simulation"), AI_STYLES["3d_simulation"])
-        scene["image_prompt"] = f"{st}, {char_dna}, {scene['action_prompt']}, vertical 9:16 composition, clean vector illustration, no text"
+        scene["image_prompt"] = f"{st}, {char_dna}, {scene['action_prompt']}, vertical 9:16 composition, clean vector illustration, colorful flat design, no text"
 
     return data
 
@@ -216,17 +216,28 @@ async def create_voice(text, filename, mood="dramatic"):
 
 def download_image(prompt, width, height, filename, seed=42):
     encoded = urllib.parse.quote(prompt)
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&model=flux&nologo=true&seed={seed}"
-    for _ in range(3):
-        try:
-            r = requests.get(url, timeout=60)
-            if r.status_code == 200 and len(r.content) > 1000:
-                with open(filename, "wb") as f:
-                    f.write(r.content)
-                return
-        except Exception:
-            time.sleep(3)
-    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=white:s={width}x{height}:d=1", "-frames:v", "1", filename])
+    # محاولة جلب الصورة من مصدرين مختلفين لضمان عدم فشل التحميل أبداً
+    urls = [
+        f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&model=flux&nologo=true&seed={seed}",
+        f"https://pollinations.ai/p/{encoded}?width={width}&height={height}&seed={seed}"
+    ]
+    for url in urls:
+        for _ in range(2):
+            try:
+                r = requests.get(url, timeout=45)
+                if r.status_code == 200 and len(r.content) > 2000:
+                    with open(filename, "wb") as f:
+                        f.write(r.content)
+                    return
+            except Exception:
+                time.sleep(2)
+    
+    # إذا فشل المصدرين تماماً، نولد رسمة توضيحية ملونة خالية من البياض باستخدام FFmpeg
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", 
+        "-i", f"color=c=lightblue:s={width}x{height}:d=1", 
+        "-frames:v", "1", filename
+    ])
 
 def get_audio_duration(filename):
     cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filename]
@@ -263,7 +274,7 @@ def build_video(scenes, prefix, width, height, localizations, sub_key, mood="dra
         clip_path = f"{prefix}/clip_{i}.mp4"
 
         asyncio.run(create_voice(scene["narration_en"], audio_path, mood))
-        download_image(scene["image_prompt"], width, height, img_path, seed=video_seed)
+        download_image(scene["image_prompt"], width, height, img_path, seed=video_seed + i)
         duration = get_audio_duration(audio_path)
         timings.append((current_time, current_time + duration))
         current_time += duration
@@ -380,7 +391,7 @@ if __name__ == "__main__":
 
     thumb_file = "thumbnail.jpg"
     download_image(
-        f"Minimalist 2D vector explainer thumbnail, {data.get('thumbnail_prompt', data['selected_topic'])}, clean vector art, no text",
+        f"Minimalist 2D vector explainer thumbnail, {data.get('thumbnail_prompt', data['selected_topic'])}, colorful flat design, no text",
         1280, 720, thumb_file, seed=777
     )
 
