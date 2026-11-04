@@ -51,7 +51,7 @@ def get_active_gemini_model(api_key):
     res.raise_for_status()
     models = res.json().get("models", [])
     
-     excluded = ["vision", "embedding", "imagen", "tts", "audio", "robotics", "computer-use", "aqa"]
+    excluded = ["vision", "embedding", "imagen", "tts", "audio", "robotics", "computer-use", "aqa"]
     valid_models = [
         m["name"] for m in models
         if "generateContent" in m.get("supportedGenerationMethods", [])
