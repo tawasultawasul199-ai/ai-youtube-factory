@@ -160,7 +160,6 @@ def generate_content(trends):
 
     data = None
     candidate_models = get_candidate_gemini_models(api_key)
-    print(f"Found {len(candidate_models)} candidate models to test.")
 
     for model_name in candidate_models:
         for version in ["v1beta", "v1"]:
@@ -173,17 +172,13 @@ def generate_content(trends):
                     parsed = parse_ai_json(raw_text)
                     if "long_scenes" in parsed and "short_scenes" in parsed:
                         data = parsed
-                        print(f"Success with {version}/{model_name}")
                         break
-                else:
-                    print(f"Skipped {version}/{model_name} (HTTP {res.status_code})")
-            except Exception as e:
-                print(f"Error testing {version}/{model_name}: {e}")
+            except Exception:
+                pass
         if data:
             break
 
     if not data:
-        print("Falling back to Pollinations AI text generator...")
         res = requests.post(
             "https://text.pollinations.ai/",
             json={
@@ -195,8 +190,6 @@ def generate_content(trends):
         )
         res.raise_for_status()
         data = parse_ai_json(res.text)
-
-    print(f"Selected topic: {data.get('selected_topic')}")
 
     char_dna = data.get("character_dna", "")
     for scene in data["long_scenes"]:
@@ -284,4 +277,119 @@ def build_video(scenes, prefix, width, height, localizations, sub_key, mood="dra
             "-vf", vf, "-c:v", "libx264", "-t", str(duration),
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", clip_path
         ]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        clip_files.append(f"file 'clip_{i}.mp4'")
+
+    list_path = f"{prefix}/list.txt"
+    with open(list_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(clip_files))
+
+    output_video = f"{prefix}_final.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_path, "-c", "copy", output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    srt_files = {}
+    for lang in LANGUAGES:
+        srt_path = f"{prefix}_{lang}.srt"
+        subs = localizations.get(lang, {}).get(sub_key, [])
+        with open(srt_path, "w", encoding="utf-8") as f:
+            for idx, (start, end) in enumerate(timings):
+                text = subs[idx] if idx < len(subs) else scenes[idx]["narration_en"]
+                f.write(f"{idx+1}\n{format_srt_time(start)} --> {format_srt_time(end)}\n{text}\n\n")
+        srt_files[lang] = srt_path
+
+    return output_video, srt_files
+
+def upload_to_youtube(video_path, data, srt_files, thumb_path=None, is_short=False):
+    creds = Credentials(
+        None,
+        refresh_token=os.environ["YT_REFRESH_TOKEN"],
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=os.environ["YT_CLIENT_ID"],
+        client_secret=os.environ["YT_CLIENT_SECRET"]
+    )
+    youtube = build("youtube", "v3", credentials=creds)
+    localizations = data["localizations"]
+
+    loc_payload = {}
+    for lang in LANGUAGES:
+        lang_data = localizations.get(lang, localizations["en"])
+        t = lang_data["title"]
+        if is_short and "#Shorts" not in t:
+            t = f"{t[:85]} #Shorts"
+        cta = lang_data.get("pinned_comment", "Check this out:")
+        full_desc = f"🔥 {cta} {AFFILIATE_LINK}\n\n{lang_data['description']}\n\n#AI #3D #Animation #Viral"
+        loc_payload[lang] = {"title": t[:100], "description": full_desc[:4900]}
+
+    body = {
+        "snippet": {
+            "title": loc_payload["en"]["title"],
+            "description": loc_payload["en"]["description"],
+            "tags": data.get("tags", ["AI", "3D", "Documentary", "Shorts"]),
+            "defaultLanguage": "en",
+            "categoryId": "24"
+        },
+        "status": {"privacyStatus": "private", "selfDeclaredMadeForKids": False},
+        "localizations": loc_payload
+    }
+
+    media = MediaFileUpload(video_path, chunksize=-1, resumable=True)
+    req = youtube.videos().insert(part="snippet,status,localizations", body=body, media_body=media)
+    res = req.execute()
+    video_id = res["id"]
+    print(f"Uploaded {'Short' if is_short else 'Long'} Video ID: {video_id}")
+    print(f"Direct Studio Link: https://studio.youtube.com/video/{video_id}/edit")
+
+    if not is_short and thumb_path and os.path.exists(thumb_path):
+        try:
+            youtube.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(thumb_path)).execute()
+        except Exception as e:
+            print(f"Thumbnail skip: {e}")
+
+    try:
+        en_cta = localizations["en"].get("pinned_comment", "Check out this link:")
+        ar_cta = localizations.get("ar", {}).get("pinned_comment", "اضغط على الرابط التالي:")
+        es_cta = localizations.get("es", {}).get("pinned_comment", "Mira este enlace:")
+        comment_text = f"📌 {en_cta} {AFFILIATE_LINK}\n🌍 {es_cta} {AFFILIATE_LINK}\n🔥 {ar_cta} {AFFILIATE_LINK}"
+        youtube.commentThreads().insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "videoId": video_id,
+                    "topLevelComment": {"snippet": {"textOriginal": comment_text}}
+                }
+            }
+        ).execute()
+    except Exception as e:
+        print(f"Comment skip: {e}")
+
+    if not is_short:
+        for lang, srt_path in srt_files.items():
+            try:
+                youtube.captions().insert(
+                    part="snippet",
+                    body={"snippet": {"videoId": video_id, "language": lang, "name": lang.upper(), "isDraft": False}},
+                    media_body=MediaFileUpload(srt_path)
+                ).execute()
+            except Exception as e:
+                print(f"Subtitle skip {lang}: {e}")
+
+if __name__ == "__main__":
+    trends, history = get_daily_trend()
+    data = generate_content(trends)
+    mood = data.get("voice_mood", "dramatic")
+
+    thumb_file = "thumbnail.jpg"
+    download_image(
+        f"{AI_STYLES['3d_simulation']}, {data.get('thumbnail_prompt', data['selected_topic'])}, vibrant high contrast, no text",
+        1280, 720, thumb_file, seed=777
+    )
+
+    long_vid, long_srts = build_video(data["long_scenes"], "long", 1280, 720, data["localizations"], "long_subs", mood)
+    short_vid, short_srts = build_video(data["short_scenes"], "short", 720, 1280, data["localizations"], "short_subs", mood)
+
+    upload_to_youtube(long_vid, data, long_srts, thumb_path=thumb_file, is_short=False)
+    upload_to_youtube(short_vid, data, short_srts, thumb_path=None, is_short=True)
+
+    history.append(data["selected_topic"])
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
