@@ -1,0 +1,43 @@
+name: Daily AI YouTube Studio
+
+on:
+  schedule:
+    - cron: '0 15 * * *' # يعمل يومياً الساعة 5 مساءً بتوقيت القاهرة تلقائياً
+  workflow_dispatch:      # يتيح لك التشغيل الفوري بضغطة زر
+
+jobs:
+  produce_and_publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run AI Video Factory
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: python main.py
+
+      - name: Update History File
+        run: |
+          git config --local user.email "bot@github.com"
+          git config --local user.name "AutoBot"
+          git add history.json
+          git commit -m "Save published topic" || echo "No changes"
+          git push
